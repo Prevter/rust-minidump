@@ -1,5 +1,7 @@
 ![Rust CI](https://github.com/rust-minidump/rust-minidump/workflows/Rust%20CI/badge.svg?branch=main)
 
+> This fork was made to add support for split_config.apk files for Geometry Dash minidumps.
+
 # Overview
 
 This project provides type definitions, parsing, and analysis for the [minidump](https://msdn.microsoft.com/en-us/library/windows/desktop/ms680369%28v=vs.85%29.aspx) file format.

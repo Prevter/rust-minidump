@@ -15,6 +15,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::fs::File;
 use std::io;
+use std::io::BufReader;
 use std::io::prelude::*;
 use std::iter;
 use std::marker::PhantomData;
@@ -856,6 +857,33 @@ fn ensure_count_in_bound(
     Ok((number_of_entries, expected_size))
 }
 
+fn get_libcocos_signature(is_arm64: bool) -> Option<CodeView> {
+    let file = File::open("config.toml").ok()?;
+    let mut buf_reader = BufReader::new(file);
+    let mut contents = String::new();
+    buf_reader.read_to_string(&mut contents).unwrap();
+    let config = contents.parse::<toml::Table>().unwrap();
+
+    let build_id_str = if is_arm64 {
+        config["arm64_build_id"].as_str().unwrap()
+    } else {
+        config["armv7_build_id"].as_str().unwrap()
+    };
+
+    let build_id = build_id_str
+        .as_bytes()
+        .chunks(2)
+        .map(|chunk| u8::from_str_radix(str::from_utf8(chunk).unwrap(), 16).unwrap())
+        .collect::<Vec<u8>>();
+
+    Some(CodeView::Elf(
+        md::CV_INFO_ELF {
+            cv_signature: 0xdeadbeef, // unused
+            build_id
+        }
+    ))
+}
+
 impl MinidumpModule {
     /// Create a `MinidumpModule` with some basic info.
     ///
@@ -884,9 +912,26 @@ impl MinidumpModule {
         system_info: Option<&MinidumpSystemInfo>,
     ) -> Result<MinidumpModule, Error> {
         let mut offset = raw.module_name_rva as usize;
-        let name =
+        let mut name =
             read_string_utf16(&mut offset, bytes, endian).ok_or(Error::CodeViewReadFailure)?;
-        let codeview_info = if raw.cv_record.data_size == 0 {
+
+        let is_split_config = name.contains("split_config");
+        let is_64bit = match system_info {
+            Some(info) => info.cpu == Cpu::Arm64,
+            None => false,
+        };
+
+        if is_split_config {
+            if is_64bit {
+                name = String::from("/lib/arm64/libcocos2dcpp.so");
+            } else {
+                name = String::from("/lib/armeabi-v7a/libcocos2dcpp.so");
+            }
+        }
+
+        let codeview_info = if is_split_config {
+            get_libcocos_signature(is_64bit)
+        } else if raw.cv_record.data_size == 0 {
             None
         } else {
             Some(read_codeview(&raw.cv_record, bytes, endian).ok_or(Error::CodeViewReadFailure)?)
