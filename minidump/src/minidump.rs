@@ -857,18 +857,16 @@ fn ensure_count_in_bound(
     Ok((number_of_entries, expected_size))
 }
 
-fn get_libcocos_signature(is_arm64: bool) -> Option<CodeView> {
+fn get_config_buildid(is_fmod: bool, is_arm64: bool) -> Option<CodeView> {
     let file = File::open("config.toml").ok()?;
     let mut buf_reader = BufReader::new(file);
     let mut contents = String::new();
     buf_reader.read_to_string(&mut contents).unwrap();
     let config = contents.parse::<toml::Table>().unwrap();
 
-    let build_id_str = if is_arm64 {
-        config["arm64_build_id"].as_str().unwrap()
-    } else {
-        config["armv7_build_id"].as_str().unwrap()
-    };
+    let module_group = if is_fmod { "libfmod" } else { "libcocos2dcpp" };
+    let platform = if is_arm64 { "arm64_build_id" } else { "armv7_build_id" };
+    let build_id_str = config[module_group][platform].as_str().unwrap();
 
     let build_id = build_id_str
         .as_bytes()
@@ -921,16 +919,19 @@ impl MinidumpModule {
             None => false,
         };
 
+        // libfmod is around 1-2mb, while libcocos2dcpp is way above 15mb (32 bit is a bit smaller, but still works)
+        // this check should be safe enough to determine which module are we looking at
+        let is_fmod = raw.size_of_image < 5_000_000;
+
         if is_split_config {
-            if is_64bit {
-                name = String::from("/lib/arm64/libcocos2dcpp.so");
-            } else {
-                name = String::from("/lib/armeabi-v7a/libcocos2dcpp.so");
-            }
+            let mod_name = if is_fmod { "libfmod.so" } else { "libcocos2dcpp.so" };
+            let arch_name = if is_64bit { "arm64-v8a" } else { "armeabi-v7a" };
+
+            name = format!("/lib/{}/{}", arch_name, mod_name);
         }
 
         let codeview_info = if is_split_config {
-            get_libcocos_signature(is_64bit)
+            get_config_buildid(is_fmod, is_64bit)
         } else if raw.cv_record.data_size == 0 {
             None
         } else {
